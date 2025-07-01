@@ -1,0 +1,87 @@
+Bootstrap: docker
+From: nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+
+%post
+    # Set environment for build
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=UTC
+    
+    # Update and install essential packages
+    apt-get update -qq
+    apt-get install -y --no-install-recommends --allow-change-held-packages \
+        python3.11 \
+        python3.11-dev \
+        python3-pip \
+        git \
+        wget \
+        cuda-toolkit-12-2 \
+        libcudnn8 \
+        libcudnn8-dev \
+        build-essential \
+        pkg-config
+    
+    # Clean up
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    
+    # Upgrade pip
+    python3.11 -m pip install --upgrade pip wheel setuptools
+    
+    # Install PyTorch for CUDA testing comparison
+    python3.11 -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    
+    # Install numpy and other basics (but not JAX yet)
+    python3.11 -m pip install numpy scipy matplotlib
+    
+    # Create test directory
+    mkdir -p /opt/tests
+    
+    # Add debugging tools
+    apt-get update -qq
+    apt-get install -y --allow-change-held-packages strace gdb
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%files
+    /scratch/test_jax_minimal.py /opt/tests/test_jax_minimal.py
+
+%environment
+    # CUDA paths
+    export PATH="/usr/local/cuda-12.2/bin:$PATH"
+    export LD_LIBRARY_PATH="/usr/local/cuda-12.2/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+    export CUDA_HOME="/usr/local/cuda-12.2"
+    
+    # Python
+    export PYTHONPATH="/usr/local/lib/python3.11/dist-packages:$PYTHONPATH"
+    
+    # JAX/XLA environment variables for debugging
+    export JAX_LOG_LEVEL=INFO
+    export XLA_PYTHON_CLIENT_PREALLOCATE=false
+    export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+    export TF_CPP_MIN_LOG_LEVEL=0
+    export CUDA_MODULE_LOADING=EAGER
+    
+    # For H100 architecture
+    export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+    export XLA_FLAGS="--xla_gpu_cuda_data_dir=/usr/local/cuda-12.2"
+
+%runscript
+    cd /opt/tests
+    exec python3.11 test_jax_minimal.py "$@"
+
+%labels
+    Author "AlphaFold Apptainer Conversion"
+    Version "jax-test-minimal-v1"
+    Description "Minimal container to test JAX GPU functionality"
+
+%help
+    This container tests different JAX versions for GPU compatibility.
+    
+    Usage:
+    singularity run --nv jax_minimal_test.sif
+    
+    To run interactively:
+    singularity shell --nv jax_minimal_test.sif
+    
+    To test with single GPU:
+    CUDA_VISIBLE_DEVICES=0 singularity run --nv jax_minimal_test.sif

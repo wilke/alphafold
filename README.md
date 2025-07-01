@@ -93,11 +93,9 @@ Please follow these steps:
     or take a look at the following
     [NVIDIA Docker issue](https://github.com/NVIDIA/nvidia-docker/issues/1447#issuecomment-801479573).
 
-    If you wish to run AlphaFold using Singularity (a common containerization
-    platform on HPC systems) we recommend using some of the third party
-    Singularity setups as linked in
-    https://github.com/deepmind/alphafold/issues/10 or
-    https://github.com/deepmind/alphafold/issues/24.
+    If you wish to run AlphaFold using Singularity/Apptainer (a common containerization
+    platform on HPC systems), this repository now includes an official Apptainer
+    container definition. See the [Apptainer Support](#apptainer-support) section below.
 
 1.  Build the Docker image:
 
@@ -758,6 +756,81 @@ AlphaFold team at [alphafold@deepmind.com](mailto:alphafold@deepmind.com).
 We would love to hear your feedback and understand how AlphaFold has been useful
 in your research. Share your stories with us at
 [alphafold@deepmind.com](mailto:alphafold@deepmind.com).
+
+## Apptainer Support
+
+This repository includes an official Apptainer container definition for running AlphaFold
+on HPC systems that don't support Docker. Apptainer (formerly Singularity) is designed
+for secure, multi-user environments and is commonly used in academic clusters.
+
+### Building the Apptainer Container
+
+1.  Install [Apptainer](https://apptainer.org/docs/user/latest/quick_start.html#installation)
+
+2.  Build the container (requires --fakeroot for dependency installation):
+    ```bash
+    apptainer build --fakeroot alphafold.sif alphafold_apptainer.def
+    ```
+
+### Running with Apptainer
+
+Test the container dependencies:
+```bash
+apptainer exec --nv alphafold.sif /app/test_alphafold.py
+```
+
+Run AlphaFold:
+```bash
+CUDA_VISIBLE_DEVICES=0 apptainer exec --nv \
+    --bind /path/to/databases:/data:ro \
+    --bind /path/to/input:/input:ro \
+    --bind /path/to/output:/output \
+    --bind /usr/local/cuda/bin:/usr/local/cuda/bin:ro \
+    alphafold.sif \
+    /opt/conda/bin/python /app/alphafold/run_alphafold.py \
+        --fasta_paths=/input/sequence.fasta \
+        --data_dir=/data \
+        --output_dir=/output \
+        --model_preset=monomer \
+        [additional_args]
+```
+
+**Notes:**
+- The `--nv` flag enables GPU support
+- Database paths must be explicitly specified (see script examples)
+- The container includes scripts for simplified usage
+
+### Quick Test Command
+
+For a quick test with the included S100-A4 sequence:
+```bash
+# Assuming databases are in /path/to/databases and test sequence in data/seq.faa
+CUDA_VISIBLE_DEVICES=0 apptainer exec --nv \
+    --bind /path/to/databases:/data:ro \
+    --bind ./data:/input:ro \
+    --bind /tmp:/output \
+    --bind /usr/local/cuda/bin:/usr/local/cuda/bin:ro \
+    alphafold.sif \
+    /opt/conda/bin/python /app/alphafold/run_alphafold.py \
+        --fasta_paths=/input/seq.faa \
+        --data_dir=/data \
+        --output_dir=/output/test_$(date +%Y%m%d_%H%M%S) \
+        --uniref90_database_path=/data/uniref90/uniref90.fasta \
+        --mgnify_database_path=/data/mgnify/mgy_clusters_2022_05.fa \
+        --template_mmcif_dir=/data/pdb_mmcif/mmcif_files \
+        --obsolete_pdbs_path=/data/pdb_mmcif/obsolete.dat \
+        --bfd_database_path=/data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt \
+        --pdb70_database_path=/data/pdb70/pdb70 \
+        --uniref30_database_path=/data/uniref30/UniRef30_2021_03 \
+        --model_preset=monomer \
+        --use_gpu_relax=true \
+        --max_template_date=2022-01-01
+```
+
+For more details, troubleshooting, and convenience scripts, see:
+- `alphafold_apptainer_final_report.md` - Complete implementation guide
+- `alphafold_apptainer_troubleshooting.md` - Issue resolution history
+- `run_alphafold_apptainer.sh` - Convenience wrapper script
 
 ## License and Disclaimer
 
