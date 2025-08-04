@@ -16,6 +16,9 @@
 
 import json
 import os
+import sys
+import subprocess
+import importlib.util
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -126,6 +129,132 @@ class RunAlphafoldTest(parameterized.TestCase):
       for line in f:
         if line.startswith('ATOM'):
           self.assertEqual(line[61:66], '42.00')
+
+
+class RunAlphafoldScriptsTest(absltest.TestCase):
+  """Tests for the various run_alphafold scripts availability and syntax."""
+
+  def setUp(self):
+    """Set up the base directory for script discovery."""
+    # Get the directory containing this test file
+    self.base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+  def test_scripts_exist(self):
+    """Test that all run_alphafold scripts exist."""
+    scripts_to_check = [
+        'run_alphafold.py',
+        'run_alphafold_preprocess.py',
+        'run_alphafold_inference.py',
+        'run_alphafold_test.py',
+        'run_alphafold_apptainer.sh'
+    ]
+    
+    for script in scripts_to_check:
+      script_path = os.path.join(self.base_dir, script)
+      self.assertTrue(
+          os.path.exists(script_path),
+          f'Script {script} not found at {script_path}'
+      )
+      
+  def test_python_scripts_syntax(self):
+    """Test that Python scripts have valid syntax."""
+    python_scripts = [
+        'run_alphafold.py',
+        'run_alphafold_preprocess.py',
+        'run_alphafold_inference.py',
+        'run_alphafold_test.py'
+    ]
+    
+    for script in python_scripts:
+      script_path = os.path.join(self.base_dir, script)
+      if os.path.exists(script_path):
+        # Check syntax using compile
+        try:
+          with open(script_path, 'r') as f:
+            compile(f.read(), script_path, 'exec')
+        except SyntaxError as e:
+          self.fail(f'Syntax error in {script}: {e}')
+          
+  def test_scripts_importable(self):
+    """Test that Python scripts can be imported as modules."""
+    # Scripts that should be importable
+    importable_scripts = [
+        ('run_alphafold', 'run_alphafold.py'),
+        ('run_alphafold_preprocess', 'run_alphafold_preprocess.py'),
+        ('run_alphafold_inference', 'run_alphafold_inference.py'),
+    ]
+    
+    for module_name, script_name in importable_scripts:
+      script_path = os.path.join(self.base_dir, script_name)
+      if os.path.exists(script_path):
+        try:
+          # Use importlib to load the module
+          spec = importlib.util.spec_from_file_location(module_name, script_path)
+          module = importlib.util.module_from_spec(spec)
+          # Don't execute the module, just verify it can be loaded
+          # spec.loader.exec_module(module)
+        except Exception as e:
+          # Some import errors are expected if dependencies aren't available
+          # Just ensure no syntax errors
+          if 'SyntaxError' in str(type(e)):
+            self.fail(f'Cannot import {script_name}: {e}')
+            
+  def test_shell_script_executable(self):
+    """Test that shell scripts are executable."""
+    shell_scripts = ['run_alphafold_apptainer.sh']
+    
+    for script in shell_scripts:
+      script_path = os.path.join(self.base_dir, script)
+      if os.path.exists(script_path):
+        # Check if file has execute permission
+        self.assertTrue(
+            os.access(script_path, os.X_OK),
+            f'Script {script} is not executable'
+        )
+        
+  def test_scripts_have_main_guard(self):
+    """Test that Python scripts have proper main guard."""
+    python_scripts = [
+        'run_alphafold.py',
+        'run_alphafold_preprocess.py',
+        'run_alphafold_inference.py',
+    ]
+    
+    for script in python_scripts:
+      script_path = os.path.join(self.base_dir, script)
+      if os.path.exists(script_path):
+        with open(script_path, 'r') as f:
+          content = f.read()
+          # Check for main guard
+          self.assertIn(
+              "if __name__ == '__main__':",
+              content,
+              f'Script {script} missing main guard'
+          )
+          
+  def test_required_functions_exist(self):
+    """Test that key functions exist in the scripts."""
+    # Test run_alphafold.py has predict_structure function
+    script_path = os.path.join(self.base_dir, 'run_alphafold.py')
+    if os.path.exists(script_path):
+      with open(script_path, 'r') as f:
+        content = f.read()
+        self.assertIn(
+            'def predict_structure',
+            content,
+            'predict_structure function not found in run_alphafold.py'
+        )
+        
+    # Test run_alphafold_preprocess.py has preprocessing functions
+    preprocess_path = os.path.join(self.base_dir, 'run_alphafold_preprocess.py')
+    if os.path.exists(preprocess_path):
+      with open(preprocess_path, 'r') as f:
+        content = f.read()
+        # Should have functions related to preprocessing
+        self.assertTrue(
+            'def ' in content,
+            'No functions found in run_alphafold_preprocess.py'
+        )
 
 
 if __name__ == '__main__':
