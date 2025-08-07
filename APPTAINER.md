@@ -229,6 +229,22 @@ export JAX_PLATFORMS=gpu       # Force GPU usage
 
 ### Quick Validation Test
 
+Use the provided test script to validate your container:
+
+```bash
+# Test the container
+cd docker
+./test_alphafold_container.sh alphafold_ubuntu20.sif
+
+# The script will:
+# 1. Check all dependencies
+# 2. Detect GPU availability
+# 3. Run a minimal AlphaFold test
+# 4. Automatically use CPU relaxation on H100
+```
+
+For manual testing:
+
 ```bash
 # Create test sequence
 echo ">test
