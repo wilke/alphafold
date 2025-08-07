@@ -1,0 +1,81 @@
+# Base CUDA Ubuntu Template for Container Build Agent
+# This template provides common patterns for CUDA-enabled containers
+
+base_configs:
+  ubuntu20_cuda11:
+    bootstrap: docker
+    from: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
+    
+  ubuntu22_cuda12:
+    bootstrap: docker
+    from: nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+
+environment_vars:
+  common:
+    - "export PYTHONNOUSERSITE=true"
+    - "export CUDA_HOME=/usr/local/cuda"
+    - "export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+    - "export PATH=/usr/local/cuda/bin:$PATH"
+    
+  build_optimization:
+    - "export TMPDIR=/var/tmp/container-build"
+    - "export PIP_CACHE_DIR=/var/cache/pip"
+    - "export CONDA_PKGS_DIRS=/var/cache/conda/pkgs"
+
+system_packages:
+  essential:
+    - build-essential
+    - git
+    - wget
+    - curl
+    - ca-certificates
+    - locales
+    - locales-all
+    
+  development:
+    - cmake
+    - ninja-build
+    - pkg-config
+    - libhdf5-dev
+    
+  optimization:
+    - ccache
+    - parallel
+
+cuda_fixes:
+  ubuntu22_cudnn8:
+    # Fix for JAX compatibility
+    - |
+      cd /usr/lib/x86_64-linux-gnu/
+      for lib in libcudnn libcudnn_adv_infer libcudnn_adv_train libcudnn_cnn_infer libcudnn_cnn_train libcudnn_ops_infer libcudnn_ops_train; do
+          if [ -f "${lib}.so.8.9.6" ]; then
+              ln -sf "${lib}.so.8.9.6" "${lib}.so.8"
+          fi
+      done
+
+apt_flags:
+  safe_install: "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-change-held-packages"
+  update: "apt-get update && apt-get upgrade -y --allow-change-held-packages"
+  cleanup: "apt-get clean && rm -rf /var/lib/apt/lists/*"
+
+build_stages:
+  # Order optimized for caching
+  1_system_setup:
+    description: "System packages and CUDA fixes (rarely changes)"
+    cache_friendly: true
+    
+  2_python_base:
+    description: "Python and conda installation (rarely changes)"
+    cache_friendly: true
+    
+  3_scientific_libs:
+    description: "Scientific computing libraries (occasionally changes)"
+    cache_friendly: true
+    
+  4_application:
+    description: "Application-specific packages (frequently changes)"
+    cache_friendly: false
+    
+  5_configuration:
+    description: "Runtime configuration and cleanup (always runs)"
+    cache_friendly: false

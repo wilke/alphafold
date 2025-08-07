@@ -1,0 +1,77 @@
+# GPU Compatibility Matrix for Container Build Agent
+# Maps GPU architectures to required build configurations
+
+gpu_architectures:
+  v100:
+    compute_capability: "7.0"
+    sm_arch: "sm_70"
+    min_cuda: "10.0"
+    recommended_cuda: "11.8"
+    
+  a100:
+    compute_capability: "8.0"
+    sm_arch: "sm_80"
+    min_cuda: "11.0"
+    recommended_cuda: "11.8"
+    
+  h100:
+    compute_capability: "9.0"
+    sm_arch: "sm_90"
+    min_cuda: "11.8"
+    recommended_cuda: "12.2"
+    special_requirements:
+      - "OpenMM must be built from source with sm_90 support"
+      - "Requires CUDA 11.8+ for PTX JIT compilation"
+
+software_compatibility:
+  openmm:
+    conda_forge_8_0_0:
+      supported_archs: ["sm_70", "sm_80"]
+      unsupported_archs: ["sm_90"]
+      notes: "No pre-compiled PTX for H100"
+      
+    conda_forge_8_1_0:
+      supported_archs: ["sm_70", "sm_80"]
+      unsupported_archs: ["sm_90"]
+      notes: "Claims H100 support but lacks PTX"
+      
+    source_build:
+      supported_archs: ["sm_70", "sm_80", "sm_90"]
+      build_flags:
+        h100: "-DOPENMM_CUDA_COMPILER_FLAGS='-gencode arch=compute_90,code=sm_90'"
+        multi_arch: "-DOPENMM_CUDA_COMPILER_FLAGS='-gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90'"
+        
+  jax:
+    cuda11_builds:
+      supported_archs: ["sm_70", "sm_80"]
+      package: "jax[cuda11_pip]"
+      
+    cuda12_builds:
+      supported_archs: ["sm_70", "sm_80", "sm_90"]
+      package: "jax[cuda12_pip]"
+      
+  tensorflow:
+    2_13:
+      max_cuda: "11.8"
+      supported_archs: ["sm_70", "sm_80"]
+      
+    2_15:
+      max_cuda: "12.2"
+      supported_archs: ["sm_70", "sm_80", "sm_90"]
+
+known_issues:
+  ptx_compilation_error:
+    error: "CUDA_ERROR_UNSUPPORTED_PTX_VERSION"
+    affected_gpus: ["h100"]
+    affected_software: ["openmm_conda_forge"]
+    solution: "Build OpenMM from source with target architecture"
+    
+  cudnn_version_mismatch:
+    error: "Could not find cudnn*.h"
+    affected_os: ["ubuntu22.04"]
+    solution: "Create symbolic links for CUDNN 8 libraries"
+    
+  held_packages:
+    error: "Held packages were changed"
+    affected_os: ["ubuntu20.04", "ubuntu22.04"]
+    solution: "Add --allow-change-held-packages to apt-get"

@@ -1,0 +1,192 @@
+# Test Matrix Configuration for AlphaFold Container Testing
+# Used by test-orchestration-agent
+
+test_suite:
+  name: "AlphaFold Container Validation Suite"
+  version: "1.0"
+  description: "Comprehensive testing of AlphaFold Apptainer definitions on H100 GPUs"
+  
+metadata:
+  created_date: "2025-08-06"
+  environment: "ALCF H100 Cluster"
+  test_data: "/scratch/alphafold_test_debug"
+  
+parameters:
+  definition_files:
+    - name: "ubuntu20_base"
+      path: "alphafold_ubuntu20.def"
+      description: "Ubuntu 20.04 with conda OpenMM"
+      expected_behavior:
+        gpu_relax: "fail_with_ptx_error"
+        cpu_relax: "success"
+    
+    - name: "ubuntu22_base"
+      path: "alphafold_ubuntu22.def"
+      description: "Ubuntu 22.04 with conda OpenMM"
+      expected_behavior:
+        gpu_relax: "fail_with_ptx_error"
+        cpu_relax: "success"
+    
+    - name: "ubuntu22_source"
+      path: "alphafold_ubuntu22_openmm_source.def"
+      description: "Ubuntu 22.04 with source-built OpenMM"
+      expected_behavior:
+        gpu_relax: "success"
+        cpu_relax: "success"
+  
+  test_configurations:
+    - name: "gpu_relaxation"
+      params:
+        use_gpu_relax: true
+        model_preset: "monomer"
+        db_preset: "full_dbs"
+      timeout_minutes: 45
+      
+    - name: "cpu_relaxation"
+      params:
+        use_gpu_relax: false
+        model_preset: "monomer"
+        db_preset: "full_dbs"
+      timeout_minutes: 45
+  
+  hardware_profiles:
+    h100:
+      gpu_name: "NVIDIA H100"
+      compute_capability: "9.0"
+      memory_gb: 80
+      known_issues:
+        - "OpenMM conda packages lack PTX for sm_90"
+        - "Requires CUDA 11.8+"
+    
+    a100:
+      gpu_name: "NVIDIA A100"
+      compute_capability: "8.0"
+      memory_gb: 40
+      known_issues: []
+    
+    v100:
+      gpu_name: "NVIDIA V100"
+      compute_capability: "7.0"
+      memory_gb: 16
+      known_issues: []
+
+execution:
+  strategy: "fail_fast"  # Stop related tests if one fails
+  parallel_builds: 2
+  parallel_tests: 3
+  
+  build_settings:
+    use_cache: true
+    cleanup_on_success: false  # Keep artifacts for analysis
+    cleanup_on_failure: false
+    
+  test_settings:
+    reuse_features: true  # Use precomputed MSA features
+    collect_metrics: true
+    save_outputs: true
+    
+  resource_limits:
+    max_memory_gb: 100
+    max_gpu_memory_gb: 70
+    disk_space_gb: 500
+
+monitoring:
+  update_interval_seconds: 30
+  
+  metrics_to_collect:
+    - build_time_seconds
+    - test_time_seconds
+    - gpu_utilization_percent
+    - gpu_memory_used_gb
+    - cpu_utilization_percent
+    - system_memory_used_gb
+    - disk_io_mb_per_sec
+    
+  alerts:
+    - condition: "gpu_memory_used_gb > 75"
+      message: "High GPU memory usage detected"
+    - condition: "test_time_seconds > 3600"
+      message: "Test exceeding 1 hour runtime"
+
+error_patterns:
+  - pattern: "CUDA_ERROR_UNSUPPORTED_PTX_VERSION.*222"
+    category: "ptx_compatibility"
+    severity: "expected_on_h100"
+    solution: "Use CPU relaxation or build OpenMM from source"
+    
+  - pattern: "Could not create cudnn handle.*CUDNN_STATUS_NOT_INITIALIZED"
+    category: "cudnn_initialization"
+    severity: "high"
+    solution: "Check CUDNN installation and symlinks"
+    
+  - pattern: "E: Held packages were changed"
+    category: "apt_package_conflict"
+    severity: "medium"
+    solution: "Add --allow-change-held-packages to apt-get"
+    
+  - pattern: "ModuleNotFoundError: No module named 'openmm'"
+    category: "missing_dependency"
+    severity: "high"
+    solution: "Verify OpenMM installation in conda environment"
+
+reporting:
+  formats:
+    - type: "markdown"
+      path: "alphafold_test_report.md"
+      include_sections:
+        - executive_summary
+        - test_results_table
+        - failure_analysis
+        - performance_metrics
+        - recommendations
+        
+    - type: "json"
+      path: "test_summary.json"
+      include_raw_data: true
+      
+    - type: "junit"
+      path: "test_results.xml"
+      for_ci_integration: true
+  
+  visualization:
+    generate_charts: true
+    chart_types:
+      - build_time_comparison
+      - success_rate_by_config
+      - resource_utilization_timeline
+      - error_frequency_heatmap
+
+success_criteria:
+  overall:
+    min_pass_rate: 0.25  # At least 2/8 tests should pass
+    
+  per_configuration:
+    cpu_relaxation:
+      expected_pass_rate: 1.0  # All CPU tests should pass
+    gpu_relaxation:
+      expected_pass_rate: 0.33  # Only source-built should pass on H100
+      
+  performance:
+    max_build_time_seconds: 600
+    max_test_time_seconds: 2400
+
+post_processing:
+  archive:
+    enabled: true
+    path: "/scratch/alphafold_test_archives"
+    include_patterns:
+      - "*.log"
+      - "*.json"
+      - "results/*"
+    
+  cleanup:
+    remove_build_artifacts: true
+    remove_test_outputs: false
+    keep_failed_builds: true
+    
+  notifications:
+    on_completion:
+      enabled: false
+    on_failure:
+      enabled: true
+      include_logs: true

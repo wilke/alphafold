@@ -25,6 +25,10 @@ scripts/download_all_data.sh <DOWNLOAD_DIR>
 
 # Download reduced databases (faster, less accurate)
 scripts/download_all_data.sh <DOWNLOAD_DIR> reduced_dbs
+
+# Build Apptainer/Singularity container (HPC environments)
+cd docker
+apptainer build --fakeroot alphafold_ubuntu20.sif alphafold_ubuntu20.def
 ```
 
 ### Running AlphaFold Predictions
@@ -41,6 +45,15 @@ python run_alphafold.py \
 
 # Docker execution (recommended)
 python3 docker/run_docker.py \
+  --fasta_paths=<path_to_fasta> \
+  --max_template_date=2022-01-01 \
+  --db_preset=<reduced_dbs|full_dbs> \
+  --model_preset=<monomer|monomer_casp14|monomer_ptm|multimer> \
+  --data_dir=<path_to_databases> \
+  --output_dir=<output_path>
+
+# Apptainer/Singularity execution (HPC environments)
+apptainer run --nv alphafold_ubuntu20.sif \
   --fasta_paths=<path_to_fasta> \
   --max_template_date=2022-01-01 \
   --db_preset=<reduced_dbs|full_dbs> \
@@ -144,3 +157,43 @@ alphafold/
 - `plddt` - Per-residue confidence (0-100, higher is better)
 - `ptm` - Predicted TM-score (global fold confidence)
 - `predicted_aligned_error` - Pairwise distance error predictions
+
+## GPU Compatibility and Known Issues
+
+### H100 GPU Support
+
+**Issue**: OpenMM from conda-forge lacks PTX compilation for H100 (compute capability 9.0)
+**Error**: `CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)`
+**Solution**: Use CPU relaxation with `--use_gpu_relax=false`
+
+```bash
+# For H100 systems
+apptainer run --nv alphafold.sif \
+  --use_gpu_relax=false \  # Critical for H100
+  --fasta_paths=target.fasta \
+  --data_dir=/databases \
+  --output_dir=/output
+```
+
+### Ubuntu 22.04 CUDNN Issues
+
+**Issue**: CUDNN initialization failures with standard Ubuntu 22.04
+**Error**: `CUDNN_STATUS_NOT_INITIALIZED`
+**Solution**: Use `docker/alphafold_ubuntu22.def` which includes:
+- `cudnn8-devel` base image
+- Explicit CUDNN library installation
+- Comprehensive symlink fixes
+
+### Apptainer-Specific Notes
+
+1. **Build without root**: Use `--fakeroot` flag
+2. **GPU support**: Always use `--nv` flag when running
+3. **Temp directory**: Our definitions use `/var/tmp/alphafold-build` to avoid /tmp conflicts
+4. **Auto-accept licenses**: `CONDA_PLUGINS_AUTO_ACCEPT_TOS="yes"` is set
+
+### Performance Optimization
+
+- CPU relaxation impact on H100: <5% of total runtime
+- Place databases on fast storage (NVMe > SSD)
+- Use `--db_preset=reduced_dbs` for development/testing
+- Monitor GPU memory: ~40GB required per prediction

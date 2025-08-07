@@ -2,10 +2,10 @@
 
 This directory contains Docker and Apptainer/Singularity configurations for building AlphaFold containers, each serving specific deployment scenarios.
 
-## Apptainer/Singularity Definition
+## Apptainer/Singularity Definitions
 
-### **alphafold_ubuntu20.def**
-**Purpose**: Production-ready Apptainer/Singularity definition for HPC environments
+### 1. **alphafold_ubuntu20.def**
+**Purpose**: Production-ready Apptainer/Singularity definition for HPC environments (Ubuntu 20.04)
 
 **Key Features**:
 - **Base Image**: `nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu20.04`
@@ -25,6 +25,29 @@ This directory contains Docker and Apptainer/Singularity configurations for buil
 - Test time: ~32 minutes for single protein
 
 **Use Case**: HPC environments, especially ALCF systems with Apptainer support
+
+### 2. **alphafold_ubuntu22.def**
+**Purpose**: Production-ready Apptainer/Singularity definition for HPC environments (Ubuntu 22.04)
+
+**Key Features**:
+- **Base Image**: `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04`
+- **Ubuntu Version**: 22.04 LTS with CUDNN fixes
+- **OpenMM**: 8.0.0 from conda-forge
+- **GPU Support**: Works with V100, A100 (H100 requires CPU relaxation mode)
+- **Key Improvements**:
+  - Uses `devel` base image for proper CUDNN headers
+  - Explicit CUDNN library installation
+  - Comprehensive CUDNN symlink fixes
+  - Additional environment variables for library discovery
+  - Tested and verified: No CUDNN initialization errors
+
+**Validated Configuration**:
+- Successfully resolves CUDNN_STATUS_NOT_INITIALIZED errors
+- Full GPU detection (8 devices on H100 systems)
+- Build time: ~7.5 minutes
+- All dependencies load correctly
+
+**Use Case**: Modern HPC environments requiring Ubuntu 22.04, resolved CUDNN compatibility issues
 
 ## Dockerfile Overview
 
@@ -109,8 +132,11 @@ All three Dockerfiles share:
 
 ### Apptainer/Singularity
 ```bash
-# Build the Apptainer image (requires fakeroot or sudo)
+# Build Ubuntu 20.04 image (most stable)
 apptainer build --fakeroot alphafold_ubuntu20.sif alphafold_ubuntu20.def
+
+# Build Ubuntu 22.04 image (with CUDNN fixes)
+apptainer build --fakeroot alphafold_ubuntu22.sif alphafold_ubuntu22.def
 
 # For H100 systems, use with CPU relaxation
 python run_alphafold.py \
