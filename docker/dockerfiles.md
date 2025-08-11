@@ -27,27 +27,37 @@ This directory contains Docker and Apptainer/Singularity configurations for buil
 **Use Case**: HPC environments, especially ALCF systems with Apptainer support
 
 ### 2. **alphafold_ubuntu22.def**
-**Purpose**: Production-ready Apptainer/Singularity definition for HPC environments (Ubuntu 22.04)
+**Purpose**: Ubuntu 22.04 reference definition (has CUDNN issues)
 
 **Key Features**:
 - **Base Image**: `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04`
-- **Ubuntu Version**: 22.04 LTS with CUDNN fixes
+- **Ubuntu Version**: 22.04 LTS with CUDNN 8.9.7
+- **Known Issue**: CUDNN_STATUS_NOT_INITIALIZED error with JAX
+- **Status**: Non-functional due to CUDNN 8.9.7 bug
+
+**Use Case**: Reference only - use alphafold_ubuntu22_cudnn896.def instead
+
+### 3. **alphafold_ubuntu22_cudnn896.def**
+**Purpose**: Production-ready Apptainer/Singularity definition for Ubuntu 22.04
+
+**Key Features**:
+- **Base Image**: `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04`
+- **Ubuntu Version**: 22.04 LTS with CUDNN 8.9.6 (downgraded)
 - **OpenMM**: 8.0.0 from conda-forge
-- **GPU Support**: Works with V100, A100 (H100 requires CPU relaxation mode)
+- **GPU Support**: Works with V100, A100, H100 (with CPU relaxation)
 - **Key Improvements**:
-  - Uses `devel` base image for proper CUDNN headers
-  - Explicit CUDNN library installation
-  - Comprehensive CUDNN symlink fixes
-  - Additional environment variables for library discovery
-  - Tested and verified: No CUDNN initialization errors
+  - Manually installs CUDNN 8.9.6 to avoid 8.9.7 bug
+  - Packages held to prevent auto-upgrade
+  - Full JAX/GPU compatibility verified
+  - Same performance as Ubuntu 20.04 version
 
 **Validated Configuration**:
 - Successfully resolves CUDNN_STATUS_NOT_INITIALIZED errors
 - Full GPU detection (8 devices on H100 systems)
-- Build time: ~7.5 minutes
-- All dependencies load correctly
+- Build time: ~8 minutes
+- JAX operations confirmed working
 
-**Use Case**: Modern HPC environments requiring Ubuntu 22.04, resolved CUDNN compatibility issues
+**Use Case**: Modern HPC environments requiring Ubuntu 22.04
 
 ## Dockerfile Overview
 
@@ -135,8 +145,10 @@ All three Dockerfiles share:
 # Build Ubuntu 20.04 image (most stable)
 apptainer build --fakeroot alphafold_ubuntu20.sif alphafold_ubuntu20.def
 
-# Build Ubuntu 22.04 image (with CUDNN fixes)
-apptainer build --fakeroot alphafold_ubuntu22.sif alphafold_ubuntu22.def
+# Build Ubuntu 22.04 image with CUDNN 8.9.6 (recommended)
+apptainer build --fakeroot alphafold_ubuntu22_cudnn896.sif alphafold_ubuntu22_cudnn896.def
+
+# Note: alphafold_ubuntu22.def has CUDNN issues - do not use for production
 
 # For H100 systems, use with CPU relaxation
 python run_alphafold.py \
