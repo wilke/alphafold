@@ -1,0 +1,263 @@
+Bootstrap: docker
+From: nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+
+%post
+    # Set non-interactive frontend and auto-accept conda terms
+    export DEBIAN_FRONTEND=noninteractive
+    export CONDA_PLUGINS_AUTO_ACCEPT_TOS="yes"
+    
+    # Create a build-specific temp directory to avoid host /tmp conflicts
+    export TMPDIR=/var/tmp/alphafold-build
+    mkdir -p $TMPDIR
+    
+    # Update and install system packages (without CUDNN first)
+    apt-get update --quiet
+    apt-get install --no-install-recommends --yes --quiet \
+        build-essential \
+        cmake \
+        cuda-command-line-tools-12-2 \
+        git \
+        hmmer \
+        kalign \
+        tzdata \
+        wget
+    
+    # Remove any existing CUDNN 8.9.7 packages
+    apt-get remove --yes libcudnn8 libcudnn8-dev || true
+    
+    # Download and install CUDNN 8.9.6 specifically
+    # These are the Ubuntu 22.04 packages for CUDNN 8.9.6
+    cd $TMPDIR
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/libcudnn8_8.9.6.50-1+cuda12.2_amd64.deb
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/libcudnn8-dev_8.9.6.50-1+cuda12.2_amd64.deb
+    
+    # Install the specific CUDNN version
+    dpkg -i libcudnn8_8.9.6.50-1+cuda12.2_amd64.deb
+    dpkg -i libcudnn8-dev_8.9.6.50-1+cuda12.2_amd64.deb
+    
+    # Hold the packages to prevent upgrades
+    apt-mark hold libcudnn8 libcudnn8-dev
+    
+    # Clean up downloaded debs
+    rm -f libcudnn8*.deb
+    
+    # Clean up apt cache
+    rm -rf /var/lib/apt/lists/*
+    apt-get autoremove --yes
+    apt-get clean
+    
+    # Fix CUDNN symlinks for JAX compatibility
+    cd /usr/lib/x86_64-linux-gnu/
+    for lib in libcudnn libcudnn_adv_infer libcudnn_adv_train libcudnn_cnn_infer libcudnn_cnn_train libcudnn_ops_infer libcudnn_ops_train; do
+        if [ -f "${lib}.so.8.9.6" ]; then
+            ln -sf "${lib}.so.8.9.6" "${lib}.so.8"
+            ln -sf "${lib}.so.8.9.6" "${lib}.so"
+        fi
+    done
+    
+    # Compile HHsuite from source
+    git clone --branch v3.3.0 --single-branch https://github.com/soedinglab/hh-suite.git $TMPDIR/hh-suite \
+    && mkdir $TMPDIR/hh-suite/build \
+    && cd $TMPDIR/hh-suite/build \
+    && cmake -DCMAKE_INSTALL_PREFIX=/opt/hhsuite .. \
+    && make -j$(nproc) \
+    && make install \
+    && ln -s /opt/hhsuite/bin/* /usr/bin \
+    && cd / \
+    && rm -rf $TMPDIR/hh-suite
+    
+    # Install Miniconda
+    wget -q -P $TMPDIR https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+    && bash $TMPDIR/Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda \
+    && rm $TMPDIR/Miniconda3-latest-Linux-x86_64.sh
+    
+    # Set up conda paths
+    export PATH="/opt/conda/bin:$PATH"
+    export LD_LIBRARY_PATH="/opt/conda/lib:$LD_LIBRARY_PATH"
+    
+    # Install Conda packages with auto-accept ToS
+    /opt/conda/bin/conda install --quiet --yes conda==24.11.1 pip python=3.11 \
+    && /opt/conda/bin/conda install --quiet --yes --channel nvidia cuda=12.2.2 \
+    && /opt/conda/bin/conda install --quiet --yes --channel conda-forge openmm=8.0.0 pdbfixer \
+    && /opt/conda/bin/conda clean --all --force-pkgs-dirs --yes
+    
+    # Create app directory
+    mkdir -p /app/alphafold
+    
+    # Download stereo_chemical_props.txt
+    wget -q -P /app/alphafold/alphafold/common/ \
+        https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
+    
+    # Add SETUID bit to ldconfig for non-root GPU access
+    chmod u+s /sbin/ldconfig.real || chmod u+s /sbin/ldconfig || true
+    
+    # Create run script with proper GPU initialization
+    cat > /app/run_alphafold.sh << 'EOF'
+#!/bin/bash
+# Update library cache for GPU visibility
+ldconfig 2>/dev/null || true
+# Run AlphaFold with all arguments
+exec python /app/alphafold/run_alphafold.py "$@"
+EOF
+    chmod +x /app/run_alphafold.sh
+    
+    # Create test script for validation
+    cat > /app/test_alphafold.py << 'EOF'
+#!/opt/conda/bin/python
+import sys
+import os
+print("Testing AlphaFold dependencies...")
+
+# Suppress TF warnings during test
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+try:
+    import numpy as np
+    print(f"✓ NumPy {np.__version__}")
+    
+    import jax
+    print(f"✓ JAX {jax.__version__}")
+    devices = jax.devices()
+    print(f"  Devices: {devices}")
+    if any('gpu' in str(d).lower() for d in devices):
+        print("  ✓ GPU detected")
+    else:
+        print("  ⚠ No GPU detected - AlphaFold will run on CPU (slow)")
+    
+    import tensorflow as tf
+    print(f"✓ TensorFlow {tf.__version__}")
+    
+    import alphafold
+    print("✓ AlphaFold module imported successfully")
+    
+    # Test OpenMM
+    import openmm
+    print(f"✓ OpenMM {openmm.__version__}")
+    
+    # Test CUDNN availability
+    try:
+        from tensorflow.python.platform import build_info
+        if hasattr(build_info, 'cudnn_version_number'):
+            print(f"✓ CUDNN {build_info.cudnn_version_number}")
+        else:
+            print("✓ CUDNN available")
+    except:
+        print("⚠ Could not verify CUDNN version")
+    
+    print("\nAll dependencies loaded successfully!")
+    sys.exit(0)
+    
+except Exception as e:
+    print(f"✗ Error: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+EOF
+    chmod +x /app/test_alphafold.py
+    
+    # Run ldconfig during build to create library cache
+    ldconfig
+
+%files
+    # Copy the entire alphafold directory into the container
+    . /app/alphafold
+
+%post
+    # Second %post section - runs AFTER files are copied
+    # This is necessary because we need requirements.txt from the copied files
+    # Install pip packages after files are copied
+    export PATH="/opt/conda/bin:$PATH"
+    export PYTHONNOUSERSITE=1
+    export TMPDIR=/var/tmp/alphafold-build
+    
+    # Upgrade pip first
+    /opt/conda/bin/pip install --upgrade pip --no-cache-dir
+    
+    # Install requirements
+    /opt/conda/bin/pip install -r /app/alphafold/requirements.txt --no-cache-dir
+    
+    # Install JAX with CUDA 12.2 support (matching Dockerfile)
+    /opt/conda/bin/pip install --upgrade --no-cache-dir \
+        jax==0.4.26 \
+        jaxlib==0.4.26+cuda12.cudnn89 \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    
+    # Clean up to reduce image size
+    /opt/conda/bin/conda clean --all --force-pkgs-dirs --yes
+    /opt/conda/bin/pip cache purge
+    apt-get autoremove --yes
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    # Clean up our build directory
+    rm -rf $TMPDIR
+    
+    # Final ldconfig to ensure all libraries are found
+    ldconfig
+
+%environment
+    # Core paths
+    export PATH="/opt/conda/bin:/opt/hhsuite/bin:$PATH"
+    export LD_LIBRARY_PATH="/opt/conda/lib:/usr/local/cuda-12.2/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+    export PYTHONPATH="/app/alphafold:$PYTHONPATH"
+    
+    # Conda settings
+    export CONDA_PLUGINS_AUTO_ACCEPT_TOS="yes"
+    export PYTHONNOUSERSITE=1
+    
+    # CUDA/JAX settings for optimal performance
+    export CUDA_HOME="/usr/local/cuda-12.2"
+    export CUDNN_PATH="/usr/lib/x86_64-linux-gnu"
+    export XLA_FLAGS="--xla_gpu_cuda_data_dir=/usr/local/cuda-12.2 --xla_gpu_force_compilation_parallelism=1"
+    export XLA_PYTHON_CLIENT_PREALLOCATE=false
+    export XLA_PYTHON_CLIENT_MEM_FRACTION=0.90
+    export TF_FORCE_GPU_ALLOW_GROWTH=true
+    export CUDA_MODULE_LOADING=EAGER
+    
+    # Working directory
+    export WORKDIR="/app/alphafold"
+
+%runscript
+    cd /app/alphafold
+    exec /app/run_alphafold.sh "$@"
+
+%labels
+    Author DeepMind Technologies Limited / Apptainer Build
+    Version alphafold-2.3.2-ubuntu22.04-cudnn8.9.6
+    CUDA-Version 12.2.2
+    CUDNN-Version 8.9.6
+    JAX-Version 0.4.26
+    Python-Version 3.11
+    Description AlphaFold protein structure prediction system with CUDNN 8.9.6
+
+%help
+    AlphaFold v2.3.2 - Protein structure prediction system
+    
+    This version uses CUDNN 8.9.6 for Ubuntu 22.04 compatibility.
+    
+    Basic usage:
+    apptainer run --nv alphafold_ubuntu22_cudnn896.sif \
+      --fasta_paths=<path_to_fasta> \
+      --max_template_date=2022-01-01 \
+      --db_preset=<reduced_dbs|full_dbs> \
+      --model_preset=<monomer|monomer_casp14|monomer_ptm|multimer> \
+      --data_dir=<path_to_databases> \
+      --output_dir=<output_path>
+    
+    To test installation:
+    apptainer exec --nv alphafold_ubuntu22_cudnn896.sif /app/test_alphafold.py
+    
+    Model presets:
+    - monomer: Single chain prediction (fastest)
+    - monomer_casp14: 8 model ensemble as used in CASP14
+    - monomer_ptm: Single chain with pTM score and PAE
+    - multimer: Multi-chain complex prediction
+    
+    Database presets:
+    - reduced_dbs: Uses small_bfd (faster, less accurate)
+    - full_dbs: Full BFD database (slower, more accurate)
+    
+    Notes:
+    - The --nv flag is REQUIRED for GPU support
+    - Ensure databases are downloaded to data_dir
+    - Output includes PDB files, confidence metrics, and MSAs
+    - H100 GPUs: Use --use_gpu_relax=false due to OpenMM compatibility
