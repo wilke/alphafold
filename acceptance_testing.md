@@ -139,7 +139,7 @@ Total estimated time: 9 hours for comprehensive testing
    - Compare outputs for consistency
    - Validate GPU utilization
 
-**Test Script:** `test_basic_functionality.sh`
+**Test Script:** ~~`test_basic_functionality.sh`~~ (**DELETED - August 15, 2025 - superseded by comprehensive testing framework in `/test_scripts/`**)
 
 ```bash
 #!/bin/bash
