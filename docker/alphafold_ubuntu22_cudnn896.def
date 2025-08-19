@@ -119,7 +119,7 @@ try:
     print(f"✓ JAX {jax.__version__}")
     devices = jax.devices()
     print(f"  Devices: {devices}")
-    if any('gpu' in str(d).lower() for d in devices):
+    if any('cuda' in str(d).lower() for d in devices):
         print("  ✓ GPU detected")
     else:
         print("  ⚠ No GPU detected - AlphaFold will run on CPU (slow)")
